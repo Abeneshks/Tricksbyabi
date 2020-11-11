@@ -1,0 +1,260 @@
+#!/usr/bin/env python
+
+import sys
+import shutil
+import asyncio
+import logging
+from telegram.error import NetworkError, Unauthorized
+from time import sleep
+from telethon import TelegramClient
+import datetime
+import re
+import json
+import requests
+import urllib.parse
+import pickle
+import os.path
+
+ids = [] 
+api_key=''
+update_id = None
+update=''
+channels = []
+yourchannels=[]
+yourbot=''
+api_id = 1234
+api_hash = ""
+username=''
+password=''
+sess=requests.Session()
+
+
+
+def main():
+
+    exetimes=sys.argv[1]
+    if (int(exetimes) % 10==0):
+        print("***There may be problem with pkl files deleting them***")
+        shutil.rmtree('./pkl/')
+
+    if not os.path.exists('./pkl/'):
+        print("Creating pkl file")
+        os.mkdir("./pkl/")
+
+    print("Running script ",exetimes," times")
+    print("Bot has started...")
+    setValues()
+    """Run the bot."""
+    global update
+ 
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    last_update_id = None
+    updates = get_updates(last_update_id)
+
+    update=updates["result"][0]
+    try:
+        earnKaroBot()
+    except NetworkError:
+        sleep(1)
+
+async def generateindividualpkl(client,id):
+    with open('./pkl/'+id+'.pkl', 'wb') as output:
+        username = await client.get_entity(id)
+        pickle.dump(username, output, pickle.HIGHEST_PROTOCOL)
+
+def get_updates(offset=None):
+    URL = "https://api.telegram.org/bot{}/".format(api_key)
+    url = URL + "getUpdates?timeout=100"
+    if offset:
+        url += "&offset={}".format(offset)
+    js = get_json_from_url(url)
+    return js
+
+def get_json_from_url(url):
+    content = get_url(url)
+    js = json.loads(content)
+    return js
+
+def get_url(url):
+    response = requests.get(url)
+    content = response.content.decode("utf8")
+    return content
+
+def setValues():
+    print("\nSetting api_key, api_id, api_hash from credentials.json if you don't know how to set the values read readMe.txt...")
+    print("\n\nRunning Your bot...")
+    global api_key,api_id,api_hash,channels,yourchannels,yourbot
+    with open("credentials.json", "r") as read_file:
+        developer = json.load(read_file)
+        api_key=developer["api_key"]
+        api_id=developer["api_id"]
+        api_hash=developer["api_hash"]
+        channels=developer["channels"]
+        yourchannels=developer["your_channels"]
+        yourbot=developer["your_bot"]
+
+ 
+def earnKaroBot():
+
+    global update_id
+    print("Processing Requests...")
+    asyncio.run(createClient())
+
+async def createClient():
+
+    async with TelegramClient("session_name", api_id, api_hash) as client:
+        while True:
+            for channel in channels:
+
+                if not os.path.isfile('./pkl/'+channel+'.pkl'):
+                    print("Generating pkl for ",channel)
+                    await generateindividualpkl(client,channel)
+
+                with open('./pkl/'+channel+'.pkl', 'rb') as input:
+                    company1 = pickle.load(input)
+                    messages = await client.get_messages(company1,limit=1)
+                    for message in messages:
+                        last=re.split(":\d\d(?!:)", str(message.date))[0]
+                        now=re.split(":\d\d(?!:)", str(datetime.datetime.utcnow()))[0]
+                        if last!=now:
+                            break
+                        else:
+                            if message.id not in ids:
+
+                                print("\n****New message in channel ",channel,"\nCaptured ",now,"\n\nProcessing")
+                                found=[]
+                                ids.append(message.id)
+
+
+                                if 'http' in str(message.text):
+                                    matched=re.findall('(https?://.*)', message.text)
+                                    for match in matched:
+                                        found.append(match)
+
+                                for link in found:
+                                    ret = getAffiliateLink(link)
+                                    print("Your Affiliated link is --> ",ret)
+                                    if (ret ==-1):
+                                        continue
+                                    message.text = re.sub(link, str(ret), message.text)
+                                if update["message"] and message.text:
+                                    message.text = re.sub('(https://www.facebook.|\[In reply .?\]|\[Forwarded from .*?\])', '', message.text, flags=re.IGNORECASE)
+
+
+                                for yourchannel in yourchannels:
+                                    message.text = re.sub('(stealsales|FRCP|frcp_deals|Loot_India_Deals|Amazon_Offers_Flipkart_Loots)', yourchannel, message.text, flags=re.IGNORECASE)
+                                    message.text = message.text + "\n\nShare our channel "+yourchannel
+
+                                    if not os.path.isfile('./pkl/'+yourchannel+'.pkl'):
+                                        print("Generating pkl for ",yourchannel)
+                                        await generateindividualpkl(client,yourchannel)
+                                    with open('./pkl/'+yourchannel+'.pkl', 'rb') as input:
+                                        username = pickle.load(input)
+                                        await client.send_message(username, message.text)
+
+                                if not os.path.isfile('./pkl/'+yourbot+'.pkl'):
+                                    print("Generating pkl for ",yourbot)
+                                    await generateindividualpkl(client,yourbot)
+                                with open('./pkl/'+yourbot+'.pkl', 'rb') as input:
+                                    username = pickle.load(input)
+                                    await client.send_message(username, message.text)
+
+
+def getLoginCookies():
+    
+    global sess
+    nounce = getNounce()
+    with open('./credentials.json') as f:
+        credentials = json.load(f)
+    
+    headers = {
+        'Accept': '/',
+        'Referer': 'https://earnkaro.com/',
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    }
+
+    data = {
+    '_csrf': '',
+    'rem_user': '0',
+    'action': 'login',
+    }
+    data['nonce']=nounce
+    data['username']=credentials['email']
+    data['pwd']=credentials['password']
+
+    response = sess.post('https://earnkaro.com/wp-admin/admin-ajax.php', headers=headers, data=data)
+    print("Session Initilized")
+    
+
+def getAffiliateLink(rlink):
+
+    global sess
+    headers = {
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+        'Origin': 'https://earnkaro.com',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://earnkaro.com/create-earn-link',
+    }
+    link=urlExpander(rlink)
+
+    data = {
+    'responseMsg': ''
+    }
+    data['deallink']=link
+
+    response = sess.post('https://earnkaro.com/create-earn-link', headers=headers, data=data)
+    if "Enter the OTP sent to your registered mobile number" in response.content.decode("utf-8"):
+        print("Initializing Session")
+        getLoginCookies()
+        return getAffiliateLink(link)
+    if "https://ekaro.in/enkr" in response.content.decode("utf-8"):
+        return re.search('https://ekaro.in/enkr\d*', response.content.decode("utf-8")).group()
+    else:
+        return rlink
+
+def getNounce():
+
+    headers = {
+        'authority': 'earnkaro.com',
+        'accept': 'application/json, text/javascript, /; q=0.01',
+        'x-requested-with': 'XMLHttpRequest',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'origin': 'https://earnkaro.com',
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
+        'referer': 'https://earnkaro.com/',
+        'accept-language': 'en-US,en;q=0.9',
+        'cookie': '_ga=GA1.2.714361242.1572989052; WZRK_G=f3998495de794935b3828d3428feddda; _hjid=47ea8505-fec1-43f3-9d99-b4beaec302f2; WIGZO_LEARNER_ID=86006267-114e-4788-9b16-73de963b99da; _fbp=fb.1.1589588110468.1555576247; _fw_crm_v=4755f1dd-97f9-416c-d645-58ff21dc1116; __insp_uid=617261652; _hjIncludedInSample=1; PAGE_UUID=86006267-114e-4788-9b16-73de963b99da; __insp_wid=825490797; __insp_nv=false; __insp_targlpu=aHR0cHM6Ly9lYXJua2Fyby5jb20vY3JlYXRlLWVhcm4tbGluaw%3D%3D; __insp_targlpt=RWFybkthcm8%3D; __insp_norec_sess=true; __insp_slim=1589856020073; _gid=GA1.2.826338423.1589949113; _gat_UA-22268078-28=1; X-PPS-Status=unsigned; WZRK_S_466-77K-575Z=%7B%22p%22%3A3%2C%22s%22%3A1589949110%2C%22t%22%3A1589949148%7D; pps_referance_cookie_e4adec0a3856cae8c9d623a3ee12d9ab=422d2928755904eda7f2277ee00ea424%7C%7C1589950586%7C%7C1589950046%7C%7Cdb2f992cf594b5c55603a38d40012814',
+    }
+
+    data = {
+    'action': 'get_pps_csrf_token',
+    'type': 'signIn'
+    }
+
+    response = requests.post('https://earnkaro.com/wp-admin/admin-ajax.php', headers=headers, data=data)
+    return json.loads(response.content.decode("UTF-8"))['csrf']
+
+
+def urlExpander(link):
+    
+    response = requests.get(link)
+    if "tracking.earnkaro.com" in response.url:
+        temp = re.search('https%3A%2F%2F.*', response.url).group()
+        expandurl=urllib.parse.unquote(temp)
+        while temp!=expandurl:
+            temp=expandurl
+            expandurl=urllib.parse.unquote(expandurl)
+        return expandurl
+
+    return response.url
+
+
+
+if _name_ == '_main_':
+    main()
